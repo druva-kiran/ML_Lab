@@ -1,112 +1,68 @@
-import csv
-import math
-import random
+import csv, math, random
 
 def loadCsv(filename):
-    lines = csv.reader(open(filename, "r"))
-    dataset = list(lines)
-    
-    # Check if the first row is a header (contains text)
-    # If the first item cannot be converted to a float, we assume it's a header.
-    try:
-        float(dataset[0][0]) 
-    except ValueError:
-        dataset.pop(0) # Remove the header row
-        
-    for i in range(len(dataset)):
-        dataset[i] = [float(x) for x in dataset[i]]
-    return dataset
+    data = list(csv.reader(open(filename)))
+    try: float(data[0][0])
+    except: data.pop(0) # Remove header if present
+    return [[float(x) for x in row] for row in data]
 
-def splitDataset(dataset, splitRatio):
-    trainSize = int(len(dataset) * splitRatio)
-    trainSet = []
-    copy = list(dataset)
-    while len(trainSet) < trainSize:
-        index = random.randrange(len(copy))
-        trainSet.append(copy.pop(index))
-    return [trainSet, copy]
+def splitData(data, ratio):
+    random.seed(1)
+    shuffled = list(data)
+    random.shuffle(shuffled)
+    split_idx = int(len(data) * ratio)
+    return shuffled[:split_idx], shuffled[split_idx:]
 
-def separateByClass(dataset):
-    separated = {}
-    for i in range(len(dataset)):
-        vector = dataset[i]
-        if (vector[-1] not in separated):
-            separated[vector[-1]] = []
-        separated[vector[-1]].append(vector)
-    return separated
+def separate(data):
+    d = {}
+    for row in data:
+        d.setdefault(row[-1], []).append(row)
+    return d
 
-def mean(numbers):
-    return sum(numbers) / float(len(numbers))
+def mean(x): return sum(x)/len(x)
 
-def stdev(numbers):
-    avg = mean(numbers)
-    variance = sum([pow(x - avg, 2) for x in numbers]) / float(len(numbers) - 1)
+def stdev(x):
+    avg = mean(x)
+    variance = sum((i-avg)**2 for i in x) / (len(x)-1)
     return math.sqrt(variance)
 
-def summarize(dataset):
-    summaries = [(mean(attribute), stdev(attribute)) for attribute in zip(*dataset)]
-    del summaries[-1]
-    return summaries
+def summarize(data):
+    # zip(*data) transposes rows to columns. [:-1] ignores class label
+    return [(mean(col), stdev(col)) for col in zip(*data)][:-1]
 
-def summarizeByClass(dataset):
-    separated = separateByClass(dataset)
-    summaries = {}
-    for classValue, instances in separated.items():
-        summaries[classValue] = summarize(instances)
-    return summaries
+def summarizeByClass(data):
+    return {c: summarize(rows) for c, rows in separate(data).items()}
 
-def calculateProbability(x, mean, stdev):
-    if stdev == 0: return 0 # Avoid division by zero if variance is 0
-    exponent = math.exp(-(math.pow(x - mean, 2) / (2 * math.pow(stdev, 2))))
-    return (1 / (math.sqrt(2 * math.pi) * stdev)) * exponent
+def prob(x, m, s):
+    if s == 0: return 0
+    exponent = math.exp(-(x-m)**2 / (2*s**2))
+    return (1 / (math.sqrt(2*math.pi) * s)) * exponent
 
-def calculateClassProbabilities(summaries, inputVector):
-    probabilities = {}
-    for classValue, classSummaries in summaries.items():
-        probabilities[classValue] = 1
-        for i in range(len(classSummaries)):
-            mean, stdev = classSummaries[i]
-            x = inputVector[i]
-            probabilities[classValue] *= calculateProbability(x, mean, stdev)
-    return probabilities
+def predict(summs, row):
+    probs = {}
+    for c, stats in summs.items():
+        probs[c] = 1
+        for i, (m, s) in enumerate(stats):
+            probs[c] *= prob(row[i], m, s)
+    return max(probs, key=probs.get)
 
-def predict(summaries, inputVector):
-    probabilities = calculateClassProbabilities(summaries, inputVector)
-    bestLabel, bestProb = None, -1
-    for classValue, probability in probabilities.items():
-        if bestLabel is None or probability > bestProb:
-            bestProb = probability
-            bestLabel = classValue
-    return bestLabel
-
-def getPredictions(summaries, testSet):
-    predictions = []
-    for i in range(len(testSet)):
-        result = predict(summaries, testSet[i])
-        predictions.append(result)
-    return predictions
-
-def getAccuracy(testSet, predictions):
-    correct = 0
-    for i in range(len(testSet)):
-        if testSet[i][-1] == predictions[i]:
-            correct += 1
-    return (correct / float(len(testSet))) * 100.0
+def accuracy(test, preds):
+    correct = sum(1 for i in range(len(test)) if test[i][-1] == preds[i])
+    return correct / len(test) * 100
 
 def main():
-    # Make sure this matches your file name exactly
-    filename = 'diabetes.csv' 
-    splitRatio = 0.67
-    
+    filename = 'diabetes.csv'
     try:
-        dataset = loadCsv(filename)
-        trainingSet, testSet = splitDataset(dataset, splitRatio)
-        print(f'Split {len(dataset)} rows into train={len(trainingSet)} and test={len(testSet)} rows')
-        summaries = summarizeByClass(trainingSet)
-        predictions = getPredictions(summaries, testSet)
-        accuracy = getAccuracy(testSet, predictions)
-        print(f'Accuracy: {accuracy}%')
+        data = loadCsv(filename)
+        train, test = splitData(data, 0.67)
+        print(f"Split {len(data)} rows into train={len(train)} and test={len(test)}")
+        
+        summaries = summarizeByClass(train)
+        preds = [predict(summaries, row) for row in test]
+        
+        print(f"Accuracy: {accuracy(test, preds):.2f}%")
     except FileNotFoundError:
-        print(f"Error: The file '{filename}' was not found. Make sure it is in the same folder as this script.")
+        print(f"Error: {filename} not found.")
 
-main()
+if __name__ == "__main__":
+    main()
